@@ -43,7 +43,6 @@ let rec string_of_expr = function
       let exprs_str = String.concat " " (List.map string_of_expr exprs) in
       Printf.sprintf "(%s)" exprs_str
 
-(* uxm tokenizer *)
 let tokenize (str : string) : token list =
   let chars = ref (str |> String.to_seq |> List.of_seq) in
 
@@ -78,14 +77,14 @@ let tokenize (str : string) : token list =
 
   lex_chars ()
 
-let rec parse_expr : parser_f = function (xs : tokens) -> parse_add_sub xs
+let rec parse_expr : parser_f = function (xs : tokens) -> parse_additive xs
 
-and parse_add_sub : parser_f = function
+and parse_additive : parser_f = function
   | xs ->
-      let lhs, tl = parse_mul_div xs in
-      parse_binary_op lhs tl [ '+'; '-' ] parse_mul_div
+      let lhs, tl = parse_multiplicative xs in
+      parse_binary_op lhs tl [ '+'; '-' ] parse_multiplicative
 
-and parse_mul_div : parser_f = function
+and parse_multiplicative : parser_f = function
   | xs ->
       let lhs, tl = parse_unary xs in
       parse_binary_op lhs tl [ '*'; '/' ] parse_unary
@@ -122,7 +121,7 @@ and parse_primary : parser_f = function
       let expr, tl' = parse_expr tl in
       match tl' with
       | Symbol ')' :: tl'' -> (expr, tl'')
-      | _ -> raise (ParseError "Expected closing ')'"))
+      | _ -> raise (ParseError "Expected closing )"))
   | tkn :: _ ->
       raise
         (ParseError (Printf.sprintf "Unexpected token %s" (string_of_token tkn)))
@@ -136,7 +135,7 @@ and parse_args : tokens -> expr list * tokens = function
         match tl1 with
         | Symbol ',' :: tl' -> parse_args tl'
         | Symbol ')' :: tl' -> ([], tl')
-        | _ -> raise (ParseError "Expected ',' or ')' in function arguments")
+        | _ -> raise (ParseError "Expected , or ) in function arguments")
       in
       (arg :: args, tl2)
 
@@ -147,31 +146,6 @@ and parse_math_expr (xs : tokens) : expr list =
 
 and parse_loose (xs : tokens) : expr = List.nth (parse_math_expr xs) 0
 
-and substitute (r : rule) (ast : expr) : expr =
-  if expr_equal ast r.lhs then r.rhs
-  else
-    match ast with
-    | UnaryOp (op, e) -> UnaryOp (op, substitute r e)
-    | BinaryOp (op, left, right) ->
-        BinaryOp (op, substitute r left, substitute r right)
-    | Call (f, args) -> Call (f, List.map (substitute r) args)
-    | Group exprs -> Group (List.map (substitute r) exprs)
-    | _ -> ast
-
-(* Helper function to check structural equality *)
-and expr_equal e1 e2 =
-  match (e1, e2) with
-  | IntLit i1, IntLit i2 -> i1 = i2
-  | Var v1, Var v2 -> v1 = v2
-  | UnaryOp (op1, e1), UnaryOp (op2, e2) -> op1 = op2 && expr_equal e1 e2
-  | BinaryOp (op1, l1, r1), BinaryOp (op2, l2, r2) ->
-      op1 = op2 && expr_equal l1 l2 && expr_equal r1 r2
-  | Call (f1, args1), Call (f2, args2) ->
-      f1 = f2 && List.for_all2 expr_equal args1 args2
-  | Group es1, Group es2 -> List.for_all2 expr_equal es1 es2
-  | _, _ -> false
-
-(* Check if a variable (Var _) matches any part of the pattern *)
 and matches pattern target env =
   match (pattern, target) with
   | IntLit i, IntLit j when i = j -> Some env
@@ -194,7 +168,6 @@ and matches pattern target env =
         (Some env) es1 es2
   | _ -> None
 
-(* Apply substitution according to the environment *)
 and apply env expr =
   match expr with
   | Var v -> ( try List.assoc v env with Not_found -> expr)
@@ -204,7 +177,6 @@ and apply env expr =
   | Call (f, args) -> Call (f, List.map (apply env) args)
   | Group es -> Group (List.map (apply env) es)
 
-(* Main subst function with pattern matching and substitution *)
 and subst pattern replacement target =
   match matches pattern target [] with
   | Some env -> apply env replacement
