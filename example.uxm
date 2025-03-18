@@ -1,0 +1,24 @@
+
+defrule succ
+    x into s(x)
+endrule
+
+defrule prec
+    s(x) into x
+endrule
+
+defex exemple 0 endex
+
+apply succ exemple
+apply succ exemple
+apply succ exemple
+apply succ exemple
+
+puts exemple
+
+apply prec exemple
+apply prec exemple
+apply prec exemple
+
+puts exemple
+
