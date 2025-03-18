@@ -43,7 +43,7 @@ let rec string_of_expr = function
       let exprs_str = String.concat " " (List.map string_of_expr exprs) in
       Printf.sprintf "(%s)" exprs_str
 
-let tokenize (str : string) : token list =
+and tokenize (str : string) : token list =
   let chars = ref (str |> String.to_seq |> List.of_seq) in
 
   let rec lex_chars () =
@@ -77,7 +77,7 @@ let tokenize (str : string) : token list =
 
   lex_chars ()
 
-let rec parse_expr : parser_f = function (xs : tokens) -> parse_additive xs
+and parse_expr : parser_f = function (xs : tokens) -> parse_additive xs
 
 and parse_additive : parser_f = function
   | xs ->
@@ -91,11 +91,9 @@ and parse_multiplicative : parser_f = function
 
 and parse_unary : parser_f = function
   | Symbol ('-' as op) :: tl ->
-      let expr, tl' = parse_unary tl in
-      (UnaryOp (op, expr), tl')
-  | Symbol '+' :: tl ->
-      let expr, tl' = parse_unary tl in
-      (expr, tl')
+      let e, tl' = parse_unary tl in
+      (UnaryOp (op, e), tl')
+  | Symbol '+' :: tl -> parse_unary tl
   | xs -> parse_exponentiation xs
 
 and parse_exponentiation : parser_f = function
@@ -140,13 +138,12 @@ and parse_args : tokens -> expr list * tokens = function
       (arg :: args, tl')
 
 and parse_math_expr (xs : tokens) : expr list =
-  match parse_expr xs with
-  | expr, [] -> [ expr ]
-  | expr, tl -> expr :: parse_math_expr tl
+  match parse_expr xs with e, [] -> [ e ] | e, tl -> e :: parse_math_expr tl
 
 and parse_loose (xs : tokens) : expr = List.nth (parse_math_expr xs) 0
 
-and matches pattern target env =
+and matches (pattern : expr) (target : expr) (env : (string * expr) list) :
+    (string * expr) list option =
   match (pattern, target) with
   | IntLiteral i, IntLiteral j when i = j -> Some env
   | Var v, _ -> Some ((v, target) :: env)
@@ -168,16 +165,16 @@ and matches pattern target env =
         (Some env) es es'
   | _ -> None
 
-and apply env expr =
-  match expr with
-  | Var v -> ( try List.assoc v env with Not_found -> expr)
-  | IntLiteral _ -> expr
+and apply (env : (string * expr) list) (e : expr) =
+  match e with
+  | Var v -> ( try List.assoc v env with Not_found -> e)
+  | IntLiteral _ -> e
   | UnaryOp (op, operand) -> UnaryOp (op, apply env operand)
   | BinaryOp (op, lhs, rhs) -> BinaryOp (op, apply env lhs, apply env rhs)
   | Call (f, args) -> Call (f, List.map (apply env) args)
   | Group es -> Group (List.map (apply env) es)
 
-and subst pattern replacement target =
+and subst (pattern : expr) (replacement : expr) (target : expr) : expr =
   match matches pattern target [] with
   | Some env -> apply env replacement
   | None -> (
@@ -228,7 +225,7 @@ and run (xs : tokens) : unit =
   ()
 ;;
 
-if Array.length Sys.argv <> 3 then failwith "uxm <action> <path>";
+let _ = if Array.length Sys.argv <> 3 then failwith "uxm <action> <path>" in
 
 let ch = open_in_bin Sys.argv.(2) in
 let content = in_channel_length ch |> really_input_string ch in
