@@ -19,7 +19,7 @@ and string_of_tokens (xs : tokens) : string =
   String.concat ", " (List.map string_of_token xs)
 
 type expr =
-  | IntLit of int
+  | IntLiteral of int
   | Var of string
   | UnaryOp of char * expr
   | BinaryOp of char * expr * expr
@@ -30,7 +30,7 @@ and parser_f = token list -> expr * token list
 and rule = { lhs : expr; rhs : expr }
 
 let rec string_of_expr = function
-  | IntLit n -> string_of_int n
+  | IntLiteral n -> string_of_int n
   | Var name -> name
   | UnaryOp (op, e) -> Printf.sprintf "(%c, %s)" op (string_of_expr e)
   | BinaryOp (op, left, right) ->
@@ -112,7 +112,7 @@ and parse_binary_op (lhs : expr) (xs : tokens) (ops : char list)
   | _ -> (lhs, xs)
 
 and parse_primary : parser_f = function
-  | Int n :: tl -> (IntLit n, tl)
+  | Int n :: tl -> (IntLiteral n, tl)
   | Name n :: Symbol '(' :: tl ->
       let xs, tl' = parse_args tl in
       (Call (n, xs), tl')
@@ -130,14 +130,14 @@ and parse_primary : parser_f = function
 and parse_args : tokens -> expr list * tokens = function
   | Symbol ')' :: tl -> ([], tl)
   | xs ->
-      let arg, tl1 = parse_expr xs in
-      let args, tl2 =
-        match tl1 with
-        | Symbol ',' :: tl' -> parse_args tl'
-        | Symbol ')' :: tl' -> ([], tl')
+      let arg, tl = parse_expr xs in
+      let args, tl' =
+        match tl with
+        | Symbol ',' :: tl'' -> parse_args tl''
+        | Symbol ')' :: tl'' -> ([], tl'')
         | _ -> raise (ParseError "Expected , or ) in function arguments")
       in
-      (arg :: args, tl2)
+      (arg :: args, tl')
 
 and parse_math_expr (xs : tokens) : expr list =
   match parse_expr xs with
@@ -148,32 +148,32 @@ and parse_loose (xs : tokens) : expr = List.nth (parse_math_expr xs) 0
 
 and matches pattern target env =
   match (pattern, target) with
-  | IntLit i, IntLit j when i = j -> Some env
+  | IntLiteral i, IntLiteral j when i = j -> Some env
   | Var v, _ -> Some ((v, target) :: env)
-  | UnaryOp (op1, e1), UnaryOp (op2, e2) when op1 = op2 -> matches e1 e2 env
-  | BinaryOp (op1, l1, r1), BinaryOp (op2, l2, r2) when op1 = op2 -> (
-      match matches l1 l2 env with
-      | Some env' -> matches r1 r2 env'
+  | UnaryOp (op, e), UnaryOp (op', e') when op = op' -> matches e e' env
+  | BinaryOp (op, l, r), BinaryOp (op', l', r') when op = op' -> (
+      match matches l l' env with
+      | Some env' -> matches r r' env'
       | None -> None)
-  | Call (f1, args1), Call (f2, args2)
-    when f1 = f2 && List.length args1 = List.length args2 ->
+  | Call (f, args), Call (f', args')
+    when f = f' && List.length args = List.length args' ->
       List.fold_left2
-        (fun acc a1 a2 ->
-          match acc with Some env' -> matches a1 a2 env' | None -> None)
-        (Some env) args1 args2
-  | Group es1, Group es2 when List.length es1 = List.length es2 ->
+        (fun acc a a' ->
+          match acc with Some env' -> matches a a' env' | None -> None)
+        (Some env) args args'
+  | Group es, Group es' when List.length es = List.length es' ->
       List.fold_left2
-        (fun acc e1 e2 ->
-          match acc with Some env' -> matches e1 e2 env' | None -> None)
-        (Some env) es1 es2
+        (fun acc e e' ->
+          match acc with Some env' -> matches e e' env' | None -> None)
+        (Some env) es es'
   | _ -> None
 
 and apply env expr =
   match expr with
   | Var v -> ( try List.assoc v env with Not_found -> expr)
-  | IntLit _ -> expr
-  | UnaryOp (op, e) -> UnaryOp (op, apply env e)
-  | BinaryOp (op, l, r) -> BinaryOp (op, apply env l, apply env r)
+  | IntLiteral _ -> expr
+  | UnaryOp (op, operand) -> UnaryOp (op, apply env operand)
+  | BinaryOp (op, lhs, rhs) -> BinaryOp (op, apply env lhs, apply env rhs)
   | Call (f, args) -> Call (f, List.map (apply env) args)
   | Group es -> Group (List.map (apply env) es)
 
@@ -182,10 +182,11 @@ and subst pattern replacement target =
   | Some env -> apply env replacement
   | None -> (
       match target with
-      | IntLit _ | Var _ -> target
-      | UnaryOp (op, e) -> UnaryOp (op, subst pattern replacement e)
-      | BinaryOp (op, l, r) ->
-          BinaryOp (op, subst pattern replacement l, subst pattern replacement r)
+      | IntLiteral _ | Var _ -> target
+      | UnaryOp (op, operand) -> UnaryOp (op, subst pattern replacement operand)
+      | BinaryOp (op, lhs, rhs) ->
+          BinaryOp
+            (op, subst pattern replacement lhs, subst pattern replacement rhs)
       | Call (f, args) -> Call (f, List.map (subst pattern replacement) args)
       | Group es -> Group (List.map (subst pattern replacement) es))
 
