@@ -140,7 +140,7 @@ and parse_args : tokens -> expr list * tokens = function
 and parse_math_expr (xs : tokens) : expr list =
   match parse_expr xs with e, [] -> [ e ] | e, tl -> e :: parse_math_expr tl
 
-and parse_loose (xs : tokens) : expr = List.nth (parse_math_expr xs) 0
+and parse_loose (xs : tokens) : expr = List.hd (parse_math_expr xs)
 
 and matches (pattern : expr) (target : expr) (env : (string * expr) list) :
     (string * expr) list option =
@@ -225,7 +225,7 @@ and run (xs : tokens) : unit =
   ()
 ;;
 
-let _ = if Array.length Sys.argv <> 3 then failwith "uxm <action> <path>" in
+let () = if Array.length Sys.argv <> 3 then failwith "uxm <action> <path>" in
 
 let ch = open_in_bin Sys.argv.(2) in
 let content = in_channel_length ch |> really_input_string ch in
