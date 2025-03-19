@@ -1,24 +1,18 @@
-
-defrule succ
-    x into s(x)
+defrule add
+    add(s(A), B) into s(add(A, B))
 endrule
 
-defrule prec
-    s(x) into x
+defrule add0
+    add(0, A) into A
 endrule
 
-defex exemple 0 endex
+defex foo
+    add(s(s(s(0))), s(s(0)))
+endex
 
-apply succ exemple
-apply succ exemple
-apply succ exemple
-apply succ exemple
-
-puts exemple
-
-apply prec exemple
-apply prec exemple
-apply prec exemple
-
-puts exemple
-
+puts foo
+apply add foo
+apply add foo
+apply add foo
+apply add0 foo
+puts foo

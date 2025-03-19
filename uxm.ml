@@ -6,30 +6,22 @@ type tokenkind =
   | Int of int
   | Expr of token list
 
-and token = tokenkind
-and tokens = token list
-
-let rec string_of_token : token -> string = function
-  | Symbol c -> Printf.sprintf "(Sym %c)" c
-  | Name s -> Printf.sprintf "(Name %s)" s
-  | Int n -> Printf.sprintf "(Int %d)" n
-  | Expr xs -> "[" ^ String.concat "; " (List.map string_of_token xs) ^ "]"
-
-and string_of_tokens (xs : tokens) : string =
-  String.concat ", " (List.map string_of_token xs)
-
-type expr =
+and expr =
   | IntLiteral of int
   | Var of string
   | UnaryOp of char * expr
   | BinaryOp of char * expr * expr
-  | Call of string * expr list
-  | Group of expr list
+  | Call of string * exprs
+  | Group of exprs
 
-and parser_f = token list -> expr * token list
+and token = tokenkind
+and tokens = token list
+and exprs = expr list
+and env_t = (string * expr) list
+and parser_f = tokens -> expr * tokens
 and rule = { lhs : expr; rhs : expr }
 
-let rec string_of_expr = function
+let rec string_of_expr : expr -> string = function
   | IntLiteral n -> string_of_int n
   | Var name -> name
   | UnaryOp (op, e) -> Printf.sprintf "(%c, %s)" op (string_of_expr e)
@@ -41,13 +33,22 @@ let rec string_of_expr = function
       Printf.sprintf "%s(%s)" fname args_str
   | Group exprs ->
       let exprs_str = String.concat " " (List.map string_of_expr exprs) in
+
       Printf.sprintf "(%s)" exprs_str
 
-and tokenize (str : string) : token list =
-  let chars = ref (str |> String.to_seq |> List.of_seq) in
+and string_of_token : token -> string = function
+  | Symbol c -> Printf.sprintf "(Sym %c)" c
+  | Name s -> Printf.sprintf "(Name %s)" s
+  | Int n -> Printf.sprintf "(Int %d)" n
+  | Expr xs -> "[" ^ string_of_tokens xs ^ "]"
 
-  let rec lex_chars () =
-    let rec take_while pred acc =
+and string_of_tokens (xs : tokens) : string =
+  String.concat ", " (List.map string_of_token xs)
+
+and tokenize (str : string) : tokens =
+  let chars = ref (str |> String.to_seq |> List.of_seq) in
+  let rec lex_chars (acc : tokens) : tokens =
+    let rec take_while (pred : char -> bool) (acc : string) : string =
       match !chars with
       | c :: tl when pred c ->
           let () = chars := tl in
@@ -58,26 +59,26 @@ and tokenize (str : string) : token list =
     and is_digit = function '0' .. '9' -> true | _ -> false in
 
     match !chars with
-    | [] -> []
+    | [] -> acc
     | c :: tl ->
         let () = chars := tl in
-        if is_whitespace c then lex_chars ()
+        if is_whitespace c then lex_chars acc
         else if is_alpha c then
           let content =
             take_while
               (fun c -> is_digit c || is_alpha c || c = '_')
               (String.make 1 c)
           in
-          Name content :: lex_chars ()
+          lex_chars (Name content :: acc)
         else if is_digit c then
-          let content = take_while (fun c -> is_digit c) (String.make 1 c) in
-          Int (int_of_string content) :: lex_chars ()
-        else Symbol c :: lex_chars ()
+          let content = take_while is_digit (String.make 1 c) in
+          lex_chars (Int (int_of_string content) :: acc)
+        else lex_chars (Symbol c :: acc)
   in
 
-  lex_chars ()
+  lex_chars []
 
-and parse_expr : parser_f = function (xs : tokens) -> parse_additive xs
+and parse_expr : parser_f = function xs -> parse_additive xs
 
 and parse_additive : parser_f = function
   | xs ->
@@ -102,7 +103,7 @@ and parse_exponentiation : parser_f = function
       parse_binary_op lhs tl [ '^' ] parse_primary
 
 and parse_binary_op (lhs : expr) (xs : tokens) (ops : char list)
-    (next_parser : parser_f) =
+    (next_parser : parser_f) : expr * tokens =
   match xs with
   | Symbol op :: tl when List.mem op ops ->
       let rhs, tl' = next_parser tl in
@@ -125,7 +126,7 @@ and parse_primary : parser_f = function
         (ParseError (Printf.sprintf "Unexpected token %s" (string_of_token tkn)))
   | _ -> failwith "..."
 
-and parse_args : tokens -> expr list * tokens = function
+and parse_args : tokens -> exprs * tokens = function
   | Symbol ')' :: tl -> ([], tl)
   | xs ->
       let arg, tl = parse_expr xs in
@@ -137,13 +138,12 @@ and parse_args : tokens -> expr list * tokens = function
       in
       (arg :: args, tl')
 
-and parse_math_expr (xs : tokens) : expr list =
+and parse_math_expr (xs : tokens) : exprs =
   match parse_expr xs with e, [] -> [ e ] | e, tl -> e :: parse_math_expr tl
 
 and parse_loose (xs : tokens) : expr = List.hd (parse_math_expr xs)
 
-and matches (pattern : expr) (target : expr) (env : (string * expr) list) :
-    (string * expr) list option =
+and matches (pattern : expr) (target : expr) (env : env_t) : env_t option =
   match (pattern, target) with
   | IntLiteral i, IntLiteral j when i = j -> Some env
   | Var v, _ -> Some ((v, target) :: env)
@@ -165,7 +165,7 @@ and matches (pattern : expr) (target : expr) (env : (string * expr) list) :
         (Some env) es es'
   | _ -> None
 
-and apply (env : (string * expr) list) (e : expr) =
+and apply (env : env_t) (e : expr) =
   match e with
   | Var v -> ( try List.assoc v env with Not_found -> e)
   | IntLiteral _ -> e
@@ -188,7 +188,7 @@ and subst (pattern : expr) (replacement : expr) (target : expr) : expr =
       | Group es -> Group (List.map (subst pattern replacement) es))
 
 and run (xs : tokens) : unit =
-  let stack = xs |> List.rev |> List.to_seq |> Stack.of_seq in
+  let stack = xs |> List.to_seq |> Stack.of_seq in
   let rec parse_until (name : string) : tokens =
     match Stack.pop stack with
     | Name x when x = name -> []
@@ -203,6 +203,10 @@ and run (xs : tokens) : unit =
     | Name "defex" ->
         let name = next_name "Expected name after defex" in
         "endex" |> parse_until |> parse_loose |> Hashtbl.add exprs name
+    | Name "induction" ->
+        let var = next_name "You have to provide a name" in
+        let expr = "end" |> parse_until |> parse_math_expr in
+        ()
     | Name "apply" ->
         let rule_name = next_name "Expected rule name after apply"
         and expr_name = next_name "Expected expr name after apply <rule>" in
@@ -232,11 +236,4 @@ let content = in_channel_length ch |> really_input_string ch in
 let () = close_in ch in
 
 let action = Sys.argv.(1) in
-match action with
-| "tokenize" ->
-    content |> tokenize |> List.map string_of_token |> List.iter print_endline
-| "parse" ->
-    content |> tokenize |> parse_math_expr |> List.map string_of_expr
-    |> List.iter print_endline
-| "run" -> content |> tokenize |> run
-| _ -> failwith "TBD"
+match action with "run" -> content |> tokenize |> run | _ -> failwith "TBD"
