@@ -1,18 +1,56 @@
-defrule add
-    add(s(A), B) into s(add(A, B))
+defrule asso
+    A * (B * C) into (A * B) * C
 endrule
 
-defrule add0
-    add(0, A) into A
+defrule com
+    A * B into B * A
 endrule
 
 defex foo
-    add(s(s(s(0))), s(s(0)))
+    x * (y * z) + f(a)
 endex
 
 puts foo
-apply add foo
-apply add foo
-apply add foo
-apply add0 foo
+apply asso foo
+apply com foo
 puts foo
+
+defrule peano_succ
+    A into s(A)
+endex
+
+defrule peano_prec
+    s(A) into A
+endrule
+
+defrule peano_add
+    s(A) + B into s(A + B)
+endrule
+
+defrule peano_reduce
+    s(A) + 0 into s(A)
+endrule
+
+defrule com_add
+    A + B into B + A
+endrule
+
+defex x s(s(s(0))) + s(s(s(s(0)))) endex
+
+puts x
+apply peano_add x
+puts x
+apply peano_add x
+puts x
+apply peano_add x
+puts x
+apply com_add x
+puts x
+apply peano_reduce x
+puts x
+
+defex der
+    (f(x+h) - f(x))/h
+endex
+
+puts der
