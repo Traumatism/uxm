@@ -1,14 +1,14 @@
 defrule asso
     A * (B * C) into (A * B) * C
-endrule
+end
 
 defrule com
     A * B into B * A
-endrule
+end
 
 defex foo
     x * (y * z) + f(a)
-endex
+end
 
 puts foo
 apply asso foo
@@ -17,25 +17,25 @@ puts foo
 
 defrule peano_succ
     A into s(A)
-endex
+end
 
 defrule peano_prec
     s(A) into A
-endrule
+end
 
 defrule peano_add
     s(A) + B into s(A + B)
-endrule
+end
 
 defrule peano_reduce
     s(A) + 0 into s(A)
-endrule
+end
 
 defrule com_add
     A + B into B + A
-endrule
+end
 
-defex x s(s(s(0))) + s(s(s(s(0)))) endex
+defex x s(s(s(0))) + s(s(s(s(0)))) end
 
 puts x
 apply peano_add x
@@ -49,8 +49,21 @@ puts x
 apply peano_reduce x
 puts x
 
-defex der
-    (f(x+h) - f(x))/h
-endex
+defrule foo s(s(A)) into s(A)^2 end
+defrule bar (X^m)^n into X^(m*n) end
+defrule foo1 2 * 2 into 4 end
 
-puts der
+apply foo x
+apply foo x
+apply foo x
+apply foo x
+apply foo x
+apply foo x
+apply bar x
+apply bar x
+apply bar x
+apply bar x
+apply bar x
+apply bar x
+
+puts x

@@ -1,0 +1,12 @@
+defrule faux
+    (A + B)^2 into A^2 + B^2
+end
+
+defex a
+    (f(x)+(2*x+ 5))^2
+end
+
+puts a
+apply faux a
+puts a
+
