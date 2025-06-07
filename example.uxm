@@ -1,69 +1,53 @@
-defrule asso
-    A * (B * C) into (A * B) * C
+defrule add
+    | s(x) + y into s(x + y)
+    | s(0 + x) into s(x)
+    | 0 + s(x) into s(x)
 end
 
-defrule com
-    A * B into B * A
+defex test
+    s(s(s(0))) + s(s(s(s(0))))
 end
 
-defex foo
-    x * (y * z) + f(a)
+apply add test
+apply add test
+apply add test
+apply add test
+apply add test
+
+puts test
+
+defrule MP
+    p /\ (p => q) into q
 end
 
-puts foo
-apply asso foo
-apply com foo
-puts foo
-
-defrule peano_succ
-    A into s(A)
+defrule InductionN
+    p(0) /\ (p(n) => p(n+1)) into p(n)
 end
 
-defrule peano_prec
-    s(A) into A
+defex e0 (q(0)) /\ (q(n) => q(n+1)) end
+
+defex e1 sum(k, 1, n, k) end
+
+defrule Axiom1
+    sum(k, p, n, f(k)) + f(k + 1) into sum(k, p, n + 1, f(k))
 end
 
-defrule peano_add
-    s(A) + B into s(A + B)
+defrule Axiom2
+    sum(k, p, n, f(k)) into sum(k, p, n, f(n - k))
 end
 
-defrule peano_reduce
-    s(A) + 0 into s(A)
+defrule Telescope
+    | sum(k, p, n, a(k+1)-a(k)) into a(n+1) - a(p)
+    | prod(k, p, n, a(k+1)/a(k)) into a(n+1) / a(p)
 end
 
-defrule com_add
-    A + B into B + A
+puts e0
+apply InductionN e0
+puts e0
+
+defex e1
+    ((A + B * C = 1 <=> A = 1 - B * C) /\ (B * C = 6))
+    => (A = -7)
 end
 
-defex x s(s(s(0))) + s(s(s(s(0)))) end
-
-puts x
-apply peano_add x
-puts x
-apply peano_add x
-puts x
-apply peano_add x
-puts x
-apply com_add x
-puts x
-apply peano_reduce x
-puts x
-
-defrule foo s(s(A)) into s(A)^2 end
-defrule bar (X^m)^n into X^(m*n) end
-defrule foo1 2 * 2 into 4 end
-
-apply foo x
-apply foo x
-apply foo x
-apply foo x
-apply foo x
-apply foo x
-apply bar x
-apply bar x
-apply bar x
-apply bar x
-apply bar x
-apply bar x
-
-puts x
+puts e1
