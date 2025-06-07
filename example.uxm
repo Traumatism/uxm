@@ -46,8 +46,7 @@ apply InductionN e0
 puts e0
 
 defex e1
-    ((A + B * C = 1 <=> A = 1 - B * C) /\ (B * C = 6))
-    => (A = -7)
+    ((A + B * C = 1 <=> A = 1 - B * C) /\ (B * C = 6)) => (A = -7)
 end
 
 puts e1

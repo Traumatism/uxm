@@ -11,10 +11,9 @@ and tokens = token list
 and exprs = expr list
 and env_t = (string * expr) list
 and parser_f = tokens -> expr * tokens
-and rule_comp = { lhs : expr; rhs : expr }
+and rule_comp = expr * expr
 and rule = rule_comp list
 
-(* Convert an expression into a string *)
 let rec string_of_expr : expr -> string = function
   | Int x -> string_of_int x
   | Var x -> x
@@ -25,18 +24,15 @@ let rec string_of_expr : expr -> string = function
       Printf.sprintf "%s(%s)" f
         (String.concat ", " (List.map string_of_expr xs))
 
-(* Convert a char into a string *)
 and string_of_char : char -> string = function c -> Printf.sprintf "%c" c
 
-(* Generate a parser for a binary operator *)
-and gen_parser (ops : string list) (p' : parser_f) : parser_f =
+and gen_parser (ops : string list) (p : parser_f) : parser_f =
   let wrapper (xs : tokens) =
-    let x, tl = p' xs in
-    parse_binop x tl ops p'
+    let x, tl = p xs in
+    parse_binop x tl ops p
   in
   wrapper
 
-(* Parse a binary operation *)
 and parse_binop (x : expr) (xs : tokens) (ops : string list) (p' : parser_f) :
     expr * tokens =
   match xs with
@@ -45,7 +41,6 @@ and parse_binop (x : expr) (xs : tokens) (ops : string list) (p' : parser_f) :
       parse_binop (BinOp (op, x, y)) tl' ops p'
   | _ -> (x, xs)
 
-(* Uxm tokenizer *)
 let rec tokenize (str : string) : tokens =
   let chars = ref (str |> String.to_seq |> List.of_seq) in
   let rec lex_chars (acc : tokens) : tokens =
@@ -96,7 +91,6 @@ let rec tokenize (str : string) : tokens =
 
   lex_chars []
 
-(* Parse an infix expression *)
 and parse_expr xs =
   (gen_parsers_chain
      [
@@ -110,12 +104,10 @@ and parse_expr xs =
      ])
     xs
 
-(* Generate a chain of parsers for binary operations *)
 and gen_parsers_chain : string list list -> parser_f = function
   | [] -> gen_parser [] parse_unary
   | ops :: tl -> gen_parser ops (gen_parsers_chain tl)
 
-(* Parse unary operators *)
 and parse_unary : parser_f = function
   | ( Sym ("~" as op)
     | Sym ("-" as op)
@@ -127,7 +119,6 @@ and parse_unary : parser_f = function
       (UnOp (op, e), tl')
   | xs -> parse_primary xs
 
-(* Parse function calls *)
 and parse_primary : parser_f = function
   | Int n :: tl -> (Int n, tl)
   | Name n :: Sym "(" :: tl ->
@@ -141,7 +132,6 @@ and parse_primary : parser_f = function
       | _ -> failwith "Expected closing )")
   | _ -> failwith "Unexpected token"
 
-(* Parse function calls arguments *)
 and parse_args : tokens -> exprs * tokens = function
   | Sym ")" :: tl -> ([], tl)
   | xs ->
@@ -154,14 +144,11 @@ and parse_args : tokens -> exprs * tokens = function
       in
       (arg :: args, tl')
 
-(* Parse expression written in infix-notation *)
 and parse_math_expr (xs : tokens) : exprs =
   match parse_expr xs with e, [] -> [ e ] | e, tl -> e :: parse_math_expr tl
 
-(* Parse only the expression head *)
 and parse_loose (xs : tokens) : expr = List.hd (parse_math_expr xs)
 
-(* Do pattern matching on abstract syntax trees *)
 and matches (pattern : expr) (on : expr) (env : env_t) : env_t option =
   match (pattern, on) with
   | Int i, Int j when i = j -> Some env
@@ -198,17 +185,15 @@ and subst (from : expr) (into : expr) (on : expr) : expr =
       | Call (f, xs) -> Call (f, List.map (subst from into) xs))
 
 and run (xs : tokens) : unit =
-  let stack = xs |> List.to_seq |> Stack.of_seq in
-  let rec parse_until name =
+  let rec parse_until n =
     match Stack.pop stack with
-    | Name x when x = name -> []
-    | x -> x :: parse_until name
-  in
-  let unwrap_find msg x = match x with Some y -> y | None -> failwith msg in
-  let next_name msg =
-    match Stack.pop stack with Name x -> x | _ -> failwith msg
-  and exprs = Hashtbl.create 128
-  and rules = Hashtbl.create 128 in
+    | Name x when x = n -> []
+    | x -> x :: parse_until n
+  and unwrap_find m x = match x with Some y -> y | None -> failwith m
+  and next_name m = match Stack.pop stack with Name x -> x | _ -> failwith m
+  and exprs = Hashtbl.create 512
+  and rules = Hashtbl.create 512
+  and stack = List.to_seq xs |> Stack.of_seq in
 
   while not (Stack.is_empty stack) do
     match Stack.pop stack with
@@ -217,34 +202,31 @@ and run (xs : tokens) : unit =
         let rec aux xs acc_m acc_r =
           match Stack.pop stack with
           | Sym "|" ->
-              let new_match = "into" |> parse_until |> parse_loose in
-              let new_comps =
+              let m' = parse_loose (parse_until "into") in
+              let c' =
                 if acc_r = [] then xs
-                else
-                  { lhs = acc_m; rhs = acc_r |> List.rev |> parse_loose } :: xs
+                else (acc_m, parse_loose (List.rev acc_r)) :: xs
               in
-              aux new_comps new_match []
-          | Name "end" ->
-              { lhs = acc_m; rhs = acc_r |> List.rev |> parse_loose } :: xs
+              aux c' m' []
+          | Name "end" -> (acc_m, parse_loose (List.rev acc_r)) :: xs
           | t -> aux xs acc_m (t :: acc_r)
         in
 
         if Stack.top stack = Sym "|" then
           Hashtbl.add rules name (aux [] (Int 0) [])
         else
-          let to_match = "into" |> parse_until |> parse_loose
-          and replace_with = "end" |> parse_until |> parse_loose in
-          Hashtbl.add rules name [ { lhs = to_match; rhs = replace_with } ]
-    (* Expression definition *)
+          Hashtbl.add rules name
+            [
+              (parse_loose (parse_until "into"), parse_loose (parse_until "end"));
+            ]
     | Name "defex" ->
         let name = next_name "Expected name after defex" in
-        "end" |> parse_until |> parse_loose |> Hashtbl.add exprs name
-    (* Rule application *)
+        parse_until "end" |> parse_loose |> Hashtbl.add exprs name
     | Name "apply" ->
         let rule_name = next_name "Expected rule name after apply"
         and expr_name = next_name "Expected expr name after apply <rule>" in
         let rec aux xs acc =
-          match xs with [] -> acc | c :: tl -> aux tl (subst c.lhs c.rhs acc)
+          match xs with [] -> acc | (x, y) :: tl -> aux tl (subst x y acc)
         in
         Hashtbl.find_opt exprs expr_name
         |> unwrap_find "Expression not found"
