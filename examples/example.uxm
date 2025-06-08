@@ -17,10 +17,10 @@ apply add test
 puts test
 
 defrule InductionN
-    p(0) /\ (p(n) => p(n+1)) into p(n)
+    p(0) /\ (p(n) -> p(n+1)) into p(n)
 end
 
-defex e0 q(0) /\ (q(n) => q(n+1)) end
+defex e0 q(0) /\ (q(n) -> q(n+1)) end
 
 defex e1 (sum(k, 1, n, k)) end
 
@@ -42,7 +42,38 @@ apply InductionN e0
 puts e0
 
 defex e1
-    ((A + B * C = 1 <=> A = 1 - B * C) /\ (B * C = 6)) => (A = -7)
+    (((A + B * C = 1 <=> A = 1 - B * C) /\ (B * C = 6)) => (A = -7))
 end
 
 puts e1
+
+defrule factorial
+    | fact(1) into 1
+    | fact(n) into n * fact(n-1)
+end
+
+defex e2
+    fact(5)
+end
+
+apply factorial e2
+apply factorial e2
+apply factorial e2
+apply factorial e2
+apply factorial e2
+
+puts e2
+
+defex e3
+    x /\ (y \/ (~z))
+end
+
+defrule distribute
+    A /\ (B \/ C) into (A /\ B) \/ (A /\ C)
+end
+
+puts e3
+apply distribute e3
+puts e3
+
+

@@ -1,4 +1,6 @@
-type token = Sym of string | Int of int 
+type token = Sym of string | Int of int
+and tokens = token list
+
 and expr =
   | Int of int
   | Name of string
@@ -6,16 +8,11 @@ and expr =
   | BinOp of string * expr * expr
   | Call of string * exprs
 
-and tokens = token list
 and exprs = expr list
-and env_t = (string * expr) list
 and parser = tokens -> expr * tokens
 and rule_comp = expr * expr
 and rule = rule_comp list
-
-let rec string_of_token : token -> string = function
-  | Int x -> string_of_int x
-  | Sym x -> x
+and env_t = (string * expr) list
 
 let rec string_of_expr : expr -> string = function
   | Int x -> string_of_int x
@@ -30,11 +27,11 @@ let rec string_of_expr : expr -> string = function
 and string_of_char : char -> string = function c -> Printf.sprintf "%c" c
 
 and gen_parser (ops : string list) (p : parser) : parser =
-  let wrapper (xs : tokens) =
+  let wrap xs =
     let x, tl = p xs in
     parse_binop x tl ops p
   in
-  wrapper
+  wrap
 
 and parse_binop (x : expr) (xs : tokens) (ops : string list) (p : parser) :
     expr * tokens =
@@ -83,22 +80,24 @@ let rec tokenize (str : string) : tokens =
           | (('=' | '-' | '~') as bar) :: '>' :: tl' ->
               chars := tl';
               lex_chars (Sym (string_of_char bar ^ ">") :: acc)
-          | '/' :: '\\' :: tl' ->
+          | ('\\' as l) :: ('/' as r) :: tl' | ('/' as l) :: ('\\' as r) :: tl'
+            ->
               chars := tl';
-              lex_chars (Sym "/\\" :: acc)
-          | '\\' :: '/' :: tl' ->
-              chars := tl';
-              lex_chars (Sym "\\/" :: acc)
+              lex_chars (Sym (Printf.sprintf "%c%c" l r) :: acc)
           | _ -> lex_chars (Sym (string_of_char c) :: acc))
   in
 
   lex_chars []
 
-and parse_expr xs =
+and parse_math (xs : tokens) : exprs =
+  match parse xs with e, [] -> [ e ] | e, tl -> e :: parse_math tl
+
+and parse xs =
   (gen_parsers_chain
      [
        [ "<$>" ];
        [ "=>"; "<=>"; "->"; "<->"; "<~>"; "~>" ];
+       [ "\\/" ];
        [ "/\\" ];
        [ "=" ];
        [ "+"; "-" ];
@@ -112,11 +111,7 @@ and gen_parsers_chain : string list list -> parser = function
   | ops :: tl -> gen_parser ops (gen_parsers_chain tl)
 
 and parse_unary : parser = function
-  | ( Sym ("~" as op)
-    | Sym ("-" as op)
-    | Sym ("+" as op)
-    | Sym ("?" as op)
-    | Sym ("&" as op) )
+  | (Sym ("~" as op) | Sym ("-" as op) | Sym ("+" as op) | Sym ("&" as op))
     :: tl ->
       let e, tl' = parse_unary tl in
       (UnOp (op, e), tl')
@@ -128,7 +123,7 @@ and parse_primary : parser = function
       let xs, tl' = parse_args tl in
       (Call (n, xs), tl')
   | Sym "(" :: tl -> (
-      let expr, tl' = parse_expr tl in
+      let expr, tl' = parse tl in
       match tl' with
       | Sym ")" :: tl'' -> (expr, tl'')
       | _ -> failwith "Expected closing )")
@@ -138,7 +133,7 @@ and parse_primary : parser = function
 and parse_args : tokens -> exprs * tokens = function
   | Sym ")" :: tl -> ([], tl)
   | xs ->
-      let arg, tl = parse_expr xs in
+      let arg, tl = parse xs in
       let args, tl' =
         match tl with
         | Sym "," :: tl'' -> parse_args tl''
@@ -146,9 +141,6 @@ and parse_args : tokens -> exprs * tokens = function
         | _ -> failwith "Expected , or ) in function arguments"
       in
       (arg :: args, tl')
-
-and parse_math_expr (xs : tokens) : exprs =
-  match parse_expr xs with e, [] -> [ e ] | e, tl -> e :: parse_math_expr tl
 
 and matches (pattern : expr) (on : expr) (env : env_t) : env_t option =
   match (pattern, on) with
@@ -159,21 +151,29 @@ and matches (pattern : expr) (on : expr) (env : env_t) : env_t option =
       match matches l l' env with
       | Some env' -> matches r r' env'
       | None -> None)
-  | Call (f, xs), Call (f', xs') when List.length xs = List.length xs' ->
-      List.fold_left2
-        (fun acc a a' ->
-          match acc with Some env' -> matches a a' env' | None -> None)
-        (Some ((f, Call (f, xs')) :: env))
-        xs xs'
+  | Call (f, xs), Call (f', xs') when List.length xs = List.length xs' -> (
+      let rec match_args xs xs' env =
+        match (xs, xs') with
+        | [], [] -> Some env
+        | x :: tl, x' :: tl' -> (
+            match matches x x' env with
+            | Some env' -> match_args tl tl' env'
+            | None -> None)
+        | _ -> None
+      in
+      match match_args xs xs' ((f, Call (f, xs')) :: env) with
+      | Some x -> Some ((f, Name f') :: x)
+      | None -> None)
   | _ -> None
 
-and apply (env : env_t) (e : expr) : expr =
-  match e with
+and apply (env : env_t) : expr -> expr = function
   | Name v -> List.assoc v env
-  | Int _ -> e
+  | Int _ as e -> e
   | UnOp (op, x) -> UnOp (op, apply env x)
   | BinOp (op, x, y) -> BinOp (op, apply env x, apply env y)
-  | Call (f, args) -> Call (f, List.map (apply env) args)
+  | Call (f, args) ->
+      let f' = match List.assoc f env with Name v -> v | _ -> failwith "" in
+      Call (f', List.map (apply env) args)
 
 and subst (from : expr) (into : expr) (on : expr) : expr =
   match matches from on [] with
@@ -187,24 +187,20 @@ and subst (from : expr) (into : expr) (on : expr) : expr =
 
 and run (xs : tokens) : unit =
   let stack = xs |> List.to_seq |> Stack.of_seq in
-  let rec parse_until name =
-    match Stack.pop stack with
-    | Sym x when x = name -> []
-    | x -> x :: parse_until name
-  in
-  let unwrap = function Some y -> y | None -> failwith "Unwrap None" in
-  let next_name () =
+  let rec pu n =
+    match Stack.pop stack with Sym x when x = n -> [] | x -> x :: pu n
+  and u xs = xs |> List.rev |> parse_math |> List.hd
+  and unwrap = function Some y -> y | None -> failwith "Unwrap None"
+  and next_name () =
     match Stack.pop stack with Sym x -> x | _ -> failwith "Expected a name"
-  in
-  let parseto x = List.hd (parse_math_expr (parse_until x))
-  and exprs = Hashtbl.create 128
-  and rules = Hashtbl.create 128 in
+  and parseto x = x |> pu |> parse_math |> List.hd
+  and es = Hashtbl.create 128
+  and rs = Hashtbl.create 128 in
 
   while not (Stack.is_empty stack) do
     match Stack.pop stack with
     | Sym "defrule" ->
-        let name = next_name () in
-        let u = fun xs -> xs |> List.rev |> parse_math_expr |> List.hd in
+        let n = next_name () in
         let rec aux cs m r =
           match Stack.pop stack with
           | Sym "|" ->
@@ -213,32 +209,30 @@ and run (xs : tokens) : unit =
           | Sym "end" -> (m, u r) :: cs
           | t -> aux cs m (t :: r)
         in
-        if Stack.top stack = Sym "|" then
-          Hashtbl.add rules name (aux [] (Int 0) [])
+        if Stack.top stack = Sym "|" then Hashtbl.add rs n (aux [] (Int 0) [])
         else
           let m = parseto "into" and r = parseto "end" in
-          Hashtbl.add rules name [ (m, r) ]
+          Hashtbl.add rs n [ (m, r) ]
     | Sym "defex" ->
-        let name = next_name () in
-        Hashtbl.add exprs name (parseto "end")
+        let n = next_name () in
+        Hashtbl.add es n (parseto "end")
     | Sym "apply" ->
         let rec aux xs acc =
           match xs with [] -> acc | (x, y) :: tl -> aux tl (subst x y acc)
         in
         let r = next_name () and e = next_name () in
-        Hashtbl.find_opt exprs e |> unwrap
-        |> aux (Hashtbl.find rules r |> List.rev)
-        |> Hashtbl.add exprs e
+        Hashtbl.find_opt es e |> unwrap
+        |> aux (Hashtbl.find rs r |> List.rev)
+        |> Hashtbl.add es e
     | Sym "puts" ->
-        next_name () |> Hashtbl.find exprs |> string_of_expr |> print_endline
-    | tkn -> failwith "Unexpected token while executing"
+        next_name () |> Hashtbl.find es |> string_of_expr |> print_endline
+    | _ -> failwith "Unexpected token while executing"
   done;
   ()
 ;;
 
-if Array.length Sys.argv <> 3 then failwith "uxm <action> <path>";
-
-let ch = open_in_bin Sys.argv.(2) in
+if Array.length Sys.argv <> 2 then failwith "Usage: uxm <path>";
+let ch = open_in_bin Sys.argv.(1) in
 let content = in_channel_length ch |> really_input_string ch in
 close_in ch;
 content |> tokenize |> run
