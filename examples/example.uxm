@@ -16,20 +16,16 @@ apply add test
 
 puts test
 
-defrule MP
-    p /\ (p => q) into q
-end
-
 defrule InductionN
     p(0) /\ (p(n) => p(n+1)) into p(n)
 end
 
-defex e0 (q(0)) /\ (q(n) => q(n+1)) end
+defex e0 q(0) /\ (q(n) => q(n+1)) end
 
-defex e1 sum(k, 1, n, k) end
+defex e1 (sum(k, 1, n, k)) end
 
 defrule Axiom1
-    sum(k, p, n, f(k)) + f(k + 1) into sum(k, p, n + 1, f(k))
+    (sum(k, p, n, f(k)) + f(k + 1)) into (sum(k, p, n + 1, f(k)))
 end
 
 defrule Axiom2

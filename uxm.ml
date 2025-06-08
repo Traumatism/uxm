@@ -1,8 +1,7 @@
-type token = Sym of string | Name of string | Int of int | Expr of token list
-
+type token = Sym of string | Int of int 
 and expr =
   | Int of int
-  | Var of string
+  | Name of string
   | UnOp of string * expr
   | BinOp of string * expr * expr
   | Call of string * exprs
@@ -10,13 +9,17 @@ and expr =
 and tokens = token list
 and exprs = expr list
 and env_t = (string * expr) list
-and parser_f = tokens -> expr * tokens
+and parser = tokens -> expr * tokens
 and rule_comp = expr * expr
 and rule = rule_comp list
 
+let rec string_of_token : token -> string = function
+  | Int x -> string_of_int x
+  | Sym x -> x
+
 let rec string_of_expr : expr -> string = function
   | Int x -> string_of_int x
-  | Var x -> x
+  | Name x -> x
   | UnOp (o, x) -> Printf.sprintf "(%s%s)" o (string_of_expr x)
   | BinOp (o, x, y) ->
       Printf.sprintf "(%s %s %s)" (string_of_expr x) o (string_of_expr y)
@@ -26,19 +29,19 @@ let rec string_of_expr : expr -> string = function
 
 and string_of_char : char -> string = function c -> Printf.sprintf "%c" c
 
-and gen_parser (ops : string list) (p : parser_f) : parser_f =
+and gen_parser (ops : string list) (p : parser) : parser =
   let wrapper (xs : tokens) =
     let x, tl = p xs in
     parse_binop x tl ops p
   in
   wrapper
 
-and parse_binop (x : expr) (xs : tokens) (ops : string list) (p' : parser_f) :
+and parse_binop (x : expr) (xs : tokens) (ops : string list) (p : parser) :
     expr * tokens =
   match xs with
-  | (Name op | Sym op) :: tl when List.mem op ops ->
-      let y, tl' = p' tl in
-      parse_binop (BinOp (op, x, y)) tl' ops p'
+  | Sym op :: tl when List.mem op ops ->
+      let y, tl' = p tl in
+      parse_binop (BinOp (op, x, y)) tl' ops p
   | _ -> (x, xs)
 
 let rec tokenize (str : string) : tokens =
@@ -65,7 +68,7 @@ let rec tokenize (str : string) : tokens =
               (fun c -> is_digit c || is_alpha c || c = '_')
               (String.make 1 c)
           in
-          lex_chars (Name content :: acc)
+          lex_chars (Sym content :: acc)
         else if is_digit c then
           let content = take_while is_digit (String.make 1 c) in
           lex_chars (Int (int_of_string content) :: acc)
@@ -104,11 +107,11 @@ and parse_expr xs =
      ])
     xs
 
-and gen_parsers_chain : string list list -> parser_f = function
+and gen_parsers_chain : string list list -> parser = function
   | [] -> gen_parser [] parse_unary
   | ops :: tl -> gen_parser ops (gen_parsers_chain tl)
 
-and parse_unary : parser_f = function
+and parse_unary : parser = function
   | ( Sym ("~" as op)
     | Sym ("-" as op)
     | Sym ("+" as op)
@@ -119,17 +122,17 @@ and parse_unary : parser_f = function
       (UnOp (op, e), tl')
   | xs -> parse_primary xs
 
-and parse_primary : parser_f = function
+and parse_primary : parser = function
   | Int n :: tl -> (Int n, tl)
-  | Name n :: Sym "(" :: tl ->
+  | Sym n :: Sym "(" :: tl ->
       let xs, tl' = parse_args tl in
       (Call (n, xs), tl')
-  | Name n :: tl -> (Var n, tl)
   | Sym "(" :: tl -> (
       let expr, tl' = parse_expr tl in
       match tl' with
       | Sym ")" :: tl'' -> (expr, tl'')
       | _ -> failwith "Expected closing )")
+  | Sym n :: tl -> (Name n, tl)
   | _ -> failwith "Unexpected token"
 
 and parse_args : tokens -> exprs * tokens = function
@@ -147,12 +150,10 @@ and parse_args : tokens -> exprs * tokens = function
 and parse_math_expr (xs : tokens) : exprs =
   match parse_expr xs with e, [] -> [ e ] | e, tl -> e :: parse_math_expr tl
 
-and parse_loose (xs : tokens) : expr = List.hd (parse_math_expr xs)
-
 and matches (pattern : expr) (on : expr) (env : env_t) : env_t option =
   match (pattern, on) with
   | Int i, Int j when i = j -> Some env
-  | Var v, _ -> Some ((v, on) :: env)
+  | Name v, _ -> Some ((v, on) :: env)
   | UnOp (op, e), UnOp (op', e') when op = op' -> matches e e' env
   | BinOp (op, l, r), BinOp (op', l', r') when op = op' -> (
       match matches l l' env with
@@ -166,9 +167,9 @@ and matches (pattern : expr) (on : expr) (env : env_t) : env_t option =
         xs xs'
   | _ -> None
 
-and apply (env : env_t) (e : expr) =
+and apply (env : env_t) (e : expr) : expr =
   match e with
-  | Var v -> List.assoc v env
+  | Name v -> List.assoc v env
   | Int _ -> e
   | UnOp (op, x) -> UnOp (op, apply env x)
   | BinOp (op, x, y) -> BinOp (op, apply env x, apply env y)
@@ -179,62 +180,57 @@ and subst (from : expr) (into : expr) (on : expr) : expr =
   | Some env -> apply env into
   | None -> (
       match on with
-      | Int _ | Var _ -> on
+      | Int _ | Name _ -> on
       | UnOp (op, x) -> UnOp (op, subst from into x)
       | BinOp (op, x, y) -> BinOp (op, subst from into x, subst from into y)
       | Call (f, xs) -> Call (f, List.map (subst from into) xs))
 
 and run (xs : tokens) : unit =
-  let rec parse_until n =
+  let stack = xs |> List.to_seq |> Stack.of_seq in
+  let rec parse_until name =
     match Stack.pop stack with
-    | Name x when x = n -> []
-    | x -> x :: parse_until n
-  and unwrap_find m x = match x with Some y -> y | None -> failwith m
-  and next_name m = match Stack.pop stack with Name x -> x | _ -> failwith m
-  and exprs = Hashtbl.create 512
-  and rules = Hashtbl.create 512
-  and stack = List.to_seq xs |> Stack.of_seq in
+    | Sym x when x = name -> []
+    | x -> x :: parse_until name
+  in
+  let unwrap = function Some y -> y | None -> failwith "Unwrap None" in
+  let next_name () =
+    match Stack.pop stack with Sym x -> x | _ -> failwith "Expected a name"
+  in
+  let parseto x = List.hd (parse_math_expr (parse_until x))
+  and exprs = Hashtbl.create 128
+  and rules = Hashtbl.create 128 in
 
   while not (Stack.is_empty stack) do
     match Stack.pop stack with
-    | Name "defrule" ->
-        let name = next_name "Expected a rule name" in
-        let rec aux xs acc_m acc_r =
+    | Sym "defrule" ->
+        let name = next_name () in
+        let u = fun xs -> xs |> List.rev |> parse_math_expr |> List.hd in
+        let rec aux cs m r =
           match Stack.pop stack with
           | Sym "|" ->
-              let m' = parse_loose (parse_until "into") in
-              let c' =
-                if acc_r = [] then xs
-                else (acc_m, parse_loose (List.rev acc_r)) :: xs
-              in
-              aux c' m' []
-          | Name "end" -> (acc_m, parse_loose (List.rev acc_r)) :: xs
-          | t -> aux xs acc_m (t :: acc_r)
+              let c' = if r = [] then cs else (m, u r) :: cs in
+              aux c' (parseto "into") []
+          | Sym "end" -> (m, u r) :: cs
+          | t -> aux cs m (t :: r)
         in
-
         if Stack.top stack = Sym "|" then
           Hashtbl.add rules name (aux [] (Int 0) [])
         else
-          Hashtbl.add rules name
-            [
-              (parse_loose (parse_until "into"), parse_loose (parse_until "end"));
-            ]
-    | Name "defex" ->
-        let name = next_name "Expected name after defex" in
-        parse_until "end" |> parse_loose |> Hashtbl.add exprs name
-    | Name "apply" ->
-        let rule_name = next_name "Expected rule name after apply"
-        and expr_name = next_name "Expected expr name after apply <rule>" in
+          let m = parseto "into" and r = parseto "end" in
+          Hashtbl.add rules name [ (m, r) ]
+    | Sym "defex" ->
+        let name = next_name () in
+        Hashtbl.add exprs name (parseto "end")
+    | Sym "apply" ->
         let rec aux xs acc =
           match xs with [] -> acc | (x, y) :: tl -> aux tl (subst x y acc)
         in
-        Hashtbl.find_opt exprs expr_name
-        |> unwrap_find "Expression not found"
-        |> aux (Hashtbl.find rules rule_name |> List.rev)
-        |> Hashtbl.add exprs expr_name
-    | Name "puts" ->
-        next_name "Expected expr name after puts"
-        |> Hashtbl.find exprs |> string_of_expr |> print_endline
+        let r = next_name () and e = next_name () in
+        Hashtbl.find_opt exprs e |> unwrap
+        |> aux (Hashtbl.find rules r |> List.rev)
+        |> Hashtbl.add exprs e
+    | Sym "puts" ->
+        next_name () |> Hashtbl.find exprs |> string_of_expr |> print_endline
     | tkn -> failwith "Unexpected token while executing"
   done;
   ()
@@ -245,6 +241,4 @@ if Array.length Sys.argv <> 3 then failwith "uxm <action> <path>";
 let ch = open_in_bin Sys.argv.(2) in
 let content = in_channel_length ch |> really_input_string ch in
 close_in ch;
-
-let action = Sys.argv.(1) in
-match action with "run" -> content |> tokenize |> run | _ -> failwith "TBD"
+content |> tokenize |> run
