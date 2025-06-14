@@ -10,13 +10,12 @@ and exprs = expr list
 
 (* Un parseur est une fonction qui prend en entrée une
 expression et renvoit la première "nouvelle expression"
-parsée, ainsi que le reste du flux d'expressions *)
+parsée, ainsi que le reste du flux d'expressions. *)
 and parser = exprs -> expr * exprs
 
 (* Environnement de matching, permet par exemple de lier
 un nom de variable relier un nom de variable avec un
-sous-AST matché.
- *)
+sous-AST matché. *)
 and env_t = (string * expr) list
 
 (* str_of_expr: expr -> string
@@ -36,14 +35,13 @@ let rec str_of_expr : expr -> string = function
 
 Opérateur qui crée un sous-arbre associé à une opération binaire *.
 Les deux premières entrées sont les deux fils (LHS, RHS) et la
-troisième est le symbole représentant l'opération * en question.
-*)
+troisième est le symbole représentant l'opération * en question. *)
 and ( <*> ) : expr -> expr -> string -> expr = fun x y o -> BinOp (o, x, y)
 
 (* parse_args : expr -> exprs * exprs
 
-Permet de parser récursivement les arguments d'une fonction
-(Presque un parser) *)
+Permet de parser récursivement les arguments d'une fonction.
+En gros c'est presque un parser. *)
 and parse_args : exprs -> exprs * exprs = function
   | Sym ")" :: tl -> ([], tl)
   | tokens -> (
@@ -57,7 +55,7 @@ and parse_args : exprs -> exprs * exprs = function
 (* parse_unary : parser
 
 Etape suivant le parsing des opérateurs binaires: on parse
-les opérateur d'arité 1 (fonctions, opérateurs unaires) *)
+les opérateur d'arité 1: fonctions, opérateurs unaires... *)
 and parse_unary : parser = function
   | Sym o :: tl when List.mem o [ "~"; "-"; "+"; "&" ] ->
       let e, tl' = parse_unary tl in
@@ -72,7 +70,7 @@ and parse_unary : parser = function
 
 (* parse : parser
 
-Permet de parser complètement une expression *)
+Permet de parser complètement une expression. *)
 and parse : parser =
  fun xs ->
   create_parsers_chain
@@ -90,8 +88,8 @@ and parse : parser =
 
 (* create_parser : string list -> parser -> parser
 
-Crée un parseur pour une liste d'opérateurs "associés".
-(par exemples les opérateurs en notation multiplicative) *)
+Crée un parseur pour une liste d'opérateurs "associés",
+par exemples les opérateurs en notation multiplicative. *)
 and create_parser (os : string list) (p : parser) : parser =
   let rec aux = function
     | x, Sym o :: tl when List.mem o os ->
@@ -104,7 +102,7 @@ and create_parser (os : string list) (p : parser) : parser =
 (* create_parsers_chain : string list list -> parser
 
 Crée un parseur qui respecte un ordre de priorité sur les
-opérateurs *)
+opérateurs. *)
 and create_parsers_chain : string list list -> parser = function
   | [] -> create_parser [] parse_unary
   | os :: tl -> create_parser os (create_parsers_chain tl)
@@ -235,6 +233,7 @@ and run (xs : exprs) =
 
   while not (Stack.is_empty stack) do
     match pop () with
+    (* apply <nom règle> <nom expression> *)
     | Sym "apply" ->
         let r = sym () and e = sym () in
         let rec aux e =
@@ -268,6 +267,19 @@ and run (xs : exprs) =
                  | _ -> failwith "Invalid, structure definition")
         in
         Hashtbl.add ss n laws
+    (*
+      defrule <nom>
+        <expr> into <expr'>
+      end
+
+     (ou)
+
+      defrule <nom>
+        | <expr1> into <expr1'>
+        ...
+        | <exprN> into <exprN'>
+      end
+     *)
     | Sym "defrule" ->
         let n = sym () in
         let rec aux cs m r =
@@ -282,9 +294,15 @@ and run (xs : exprs) =
         else
           let m = pto "into" and r = pto "end" in
           Hashtbl.add rs n [ (m, r) ]
+    (*
+    defex <nom>
+        <expr>
+    end
+    *)
     | Sym "defex" ->
         let n = sym () in
         Hashtbl.add es n (pto "end")
+    (* puts <nom> *)
     | Sym "puts" -> sym () |> Hashtbl.find es |> str_of_expr |> print_endline
     | t -> failwith (Printf.sprintf "Unexpected token: %s" (str_of_expr t))
   done;
