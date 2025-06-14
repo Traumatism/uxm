@@ -1,0 +1,21 @@
+defex asso
+    x <$> ( y <$> z) = (x <$> y) <$> z
+end
+
+defex com
+    x <$> y = y <$> x
+end
+
+struct Groupe
+    | intern * e asso
+end
+
+struct GroupeAbelien
+    | intern * e asso com
+end
+
+struct Ev
+    | intern + 0 asso com
+    | intern * 1 com
+    | extern . 1 asso com
+end

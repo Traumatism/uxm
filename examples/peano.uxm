@@ -1,1 +1,28 @@
-defrule
+defrule add
+    | 0 + X into X
+    | X + 0 into X
+    | X + s(Y) into s(X + Y)
+end
+
+defrule mul
+    | X * 0 into 0
+    | X * 1 into X
+    | X * s(Y) into (X * Y) + X
+end
+
+defex e0
+    s(s(s(0))) + s(s(s(s(0))))
+end
+
+puts e0
+apply add e0
+puts e0
+
+defex e1
+    s(s(s(0))) * s(s(s(s(0))))
+end
+
+puts e1
+apply mul e1
+apply add e1
+puts e1

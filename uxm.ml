@@ -1,238 +1,297 @@
-type token = Sym of string | Int of int
-and tokens = token list
-
-and expr =
+(* Une expression est un sous-arbre d'un arbre de syntaxe *)
+type expr =
   | Int of int
-  | Name of string
+  | Sym of string
   | UnOp of string * expr
   | BinOp of string * expr * expr
   | Call of string * exprs
 
 and exprs = expr list
-and parser = tokens -> expr * tokens
-and rule_comp = expr * expr
-and rule = rule_comp list
+
+(* Un parseur est une fonction qui prend en entrée une
+expression et renvoit la première "nouvelle expression"
+parsée, ainsi que le reste du flux d'expressions *)
+and parser = exprs -> expr * exprs
+
+(* Environnement de matching, permet par exemple de lier
+un nom de variable relier un nom de variable avec un
+sous-AST matché.
+ *)
 and env_t = (string * expr) list
 
-let rec string_of_expr : expr -> string = function
+(* str_of_expr: expr -> string
+
+Prend en entrée une expression et renvoit sa
+représentation infix. *)
+let rec str_of_expr : expr -> string = function
   | Int x -> string_of_int x
-  | Name x -> x
-  | UnOp (o, x) -> Printf.sprintf "(%s%s)" o (string_of_expr x)
-  | BinOp (o, x, y) ->
-      Printf.sprintf "(%s %s %s)" (string_of_expr x) o (string_of_expr y)
-  | Call (f, xs) ->
-      Printf.sprintf "%s(%s)" f
-        (String.concat ", " (List.map string_of_expr xs))
+  | Sym x -> x
+  | UnOp (o, x) -> Printf.sprintf "%s%s" o (str_of_expr x)
+  | BinOp (o, xs, ys) ->
+      Printf.sprintf "(%s %s %s)" (str_of_expr xs) o (str_of_expr ys)
+  | Call (f, es) ->
+      Printf.sprintf "%s(%s)" f (String.concat ", " (List.map str_of_expr es))
 
-and string_of_char : char -> string = function c -> Printf.sprintf "%c" c
+(* <*>: expr -> expr -> string -> expr 
 
-and gen_parser (ops : string list) (p : parser) : parser =
-  let wrap xs =
-    let x, tl = p xs in
-    parse_binop x tl ops p
+Opérateur qui crée un sous-arbre associé à une opération binaire *.
+Les deux premières entrées sont les deux fils (LHS, RHS) et la
+troisième est le symbole représentant l'opération * en question.
+*)
+and ( <*> ) : expr -> expr -> string -> expr = fun x y o -> BinOp (o, x, y)
+
+(* parse_args : expr -> exprs * exprs
+
+Permet de parser récursivement les arguments d'une fonction
+(Presque un parser) *)
+and parse_args : exprs -> exprs * exprs = function
+  | Sym ")" :: tl -> ([], tl)
+  | tokens -> (
+      match parse tokens with
+      | e, Sym "," :: tl ->
+          let args, tl' = parse_args tl in
+          (e :: args, tl')
+      | e, Sym ")" :: tl -> (e :: [], tl)
+      | _ -> failwith "")
+
+(* parse_unary : parser
+
+Etape suivant le parsing des opérateurs binaires: on parse
+les opérateur d'arité 1 (fonctions, opérateurs unaires) *)
+and parse_unary : parser = function
+  | Sym o :: tl when List.mem o [ "~"; "-"; "+"; "&" ] ->
+      let e, tl' = parse_unary tl in
+      (UnOp (o, e), tl')
+  | Sym n :: Sym "(" :: tl ->
+      let es, tl' = parse_args tl in
+      (Call (n, es), tl')
+  | Sym "(" :: tl -> (
+      match parse tl with e, Sym ")" :: tl' -> (e, tl') | _ -> failwith "")
+  | x :: tl -> (x, tl)
+  | [] -> failwith ""
+
+(* parse : parser
+
+Permet de parser complètement une expression *)
+and parse : parser =
+ fun xs ->
+  create_parsers_chain
+    [
+      [ "=>"; "<=>"; "->"; "<->"; "<~>"; "~>" ];
+      [ "\\/" ];
+      [ "/\\" ];
+      [ "=" ];
+      [ "<$>" ];
+      [ "+"; "-" ];
+      [ "."; "*"; "/" ];
+      [ "^" ];
+    ]
+    xs
+
+(* create_parser : string list -> parser -> parser
+
+Crée un parseur pour une liste d'opérateurs "associés".
+(par exemples les opérateurs en notation multiplicative) *)
+and create_parser (os : string list) (p : parser) : parser =
+  let rec aux = function
+    | x, Sym o :: tl when List.mem o os ->
+        let y, tl' = p tl in
+        aux ((x <*> y) o, tl')
+    | x -> x
   in
-  wrap
+  fun xs -> aux (p xs)
 
-and parse_binop (x : expr) (xs : tokens) (ops : string list) (p : parser) :
-    expr * tokens =
-  match xs with
-  | Sym op :: tl when List.mem op ops ->
-      let y, tl' = p tl in
-      parse_binop (BinOp (op, x, y)) tl' ops p
-  | _ -> (x, xs)
+(* create_parsers_chain : string list list -> parser
 
-let rec tokenize (str : string) : tokens =
-  let chars = ref (str |> String.to_seq |> List.of_seq) in
-  let rec lex_chars (acc : tokens) : tokens =
-    let rec take_while p acc =
-      match !chars with
-      | c :: tl when p c ->
-          chars := tl;
-          take_while p (acc ^ String.make 1 c)
-      | _ -> acc
-    and is_alpha = function 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
-    and is_whitespace = function ' ' | '\t' | '\n' -> true | _ -> false
-    and is_digit = function '0' .. '9' -> true | _ -> false in
+Crée un parseur qui respecte un ordre de priorité sur les
+opérateurs *)
+and create_parsers_chain : string list list -> parser = function
+  | [] -> create_parser [] parse_unary
+  | os :: tl -> create_parser os (create_parsers_chain tl)
 
+(* tokenize : string -> exprs
+
+Permet d'obtenir une liste d'expressions (que des Sym et des Int)
+à partir d'une chaine de caractères. *)
+and tokenize (str : string) : exprs =
+  let rec take_while p acc =
+    match !chars with
+    | c :: tl when p c ->
+        chars := tl;
+        take_while p (acc ^ String.make 1 c)
+    | _ -> acc
+  and chars = ref (String.to_seq str |> List.of_seq)
+  and is_alph = function 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
+  and is_ws = function ' ' | '\t' | '\n' -> true | _ -> false
+  and is_dgt = function '0' .. '9' -> true | _ -> false
+  and aux acc =
     match !chars with
     | [] -> acc
     | c :: tl -> (
         chars := tl;
-        if is_whitespace c then lex_chars acc
-        else if is_alpha c then
-          let content =
+        if is_ws c then aux acc
+        else if is_alph c then
+          let v =
             take_while
-              (fun c -> is_digit c || is_alpha c || c = '_')
+              (fun c -> is_dgt c || is_alph c || c = '_')
               (String.make 1 c)
           in
-          lex_chars (Sym content :: acc)
-        else if is_digit c then
-          let content = take_while is_digit (String.make 1 c) in
-          lex_chars (Int (int_of_string content) :: acc)
+          aux (Sym v :: acc)
+        else if is_dgt c then
+          let v = String.make 1 c |> take_while is_dgt |> int_of_string in
+          aux (Int v :: acc)
         else
           match c :: tl with
           | '<' :: (('=' | '-' | '~' | '$') as bar) :: '>' :: tl' ->
               chars := tl';
-              lex_chars (Sym ("<" ^ string_of_char bar ^ ">") :: acc)
+              aux (Sym ("<" ^ String.make 1 bar ^ ">") :: acc)
           | '<' :: '>' :: tl' ->
               chars := tl';
-              lex_chars (Sym "<>" :: acc)
+              aux (Sym "<>" :: acc)
           | (('=' | '-' | '~') as bar) :: '>' :: tl' ->
               chars := tl';
-              lex_chars (Sym (string_of_char bar ^ ">") :: acc)
+              aux (Sym (String.make 1 bar ^ ">") :: acc)
           | ('\\' as l) :: ('/' as r) :: tl' | ('/' as l) :: ('\\' as r) :: tl'
             ->
               chars := tl';
-              lex_chars (Sym (Printf.sprintf "%c%c" l r) :: acc)
-          | _ -> lex_chars (Sym (string_of_char c) :: acc))
+              aux (Sym (Printf.sprintf "%c%c" l r) :: acc)
+          | _ -> aux (Sym (String.make 1 c) :: acc))
   in
 
-  lex_chars []
+  aux []
 
-and parse_math (xs : tokens) : exprs =
-  match parse xs with e, [] -> [ e ] | e, tl -> e :: parse_math tl
+(* matches : env_t -> expr * expr -> env
 
-and parse xs =
-  (gen_parsers_chain
-     [
-       [ "<$>" ];
-       [ "=>"; "<=>"; "->"; "<->"; "<~>"; "~>" ];
-       [ "\\/" ];
-       [ "/\\" ];
-       [ "=" ];
-       [ "+"; "-" ];
-       [ "."; "*"; "/" ];
-       [ "^" ];
-     ])
-    xs
-
-and gen_parsers_chain : string list list -> parser = function
-  | [] -> gen_parser [] parse_unary
-  | ops :: tl -> gen_parser ops (gen_parsers_chain tl)
-
-and parse_unary : parser = function
-  | (Sym ("~" as op) | Sym ("-" as op) | Sym ("+" as op) | Sym ("&" as op))
-    :: tl ->
-      let e, tl' = parse_unary tl in
-      (UnOp (op, e), tl')
-  | xs -> parse_primary xs
-
-and parse_primary : parser = function
-  | Int n :: tl -> (Int n, tl)
-  | Sym n :: Sym "(" :: tl ->
-      let xs, tl' = parse_args tl in
-      (Call (n, xs), tl')
-  | Sym "(" :: tl -> (
-      let expr, tl' = parse tl in
-      match tl' with
-      | Sym ")" :: tl'' -> (expr, tl'')
-      | _ -> failwith "Expected closing )")
-  | Sym n :: tl -> (Name n, tl)
-  | _ -> failwith "Unexpected token"
-
-and parse_args : tokens -> exprs * tokens = function
-  | Sym ")" :: tl -> ([], tl)
-  | xs ->
-      let arg, tl = parse xs in
-      let args, tl' =
-        match tl with
-        | Sym "," :: tl'' -> parse_args tl''
-        | Sym ")" :: tl'' -> ([], tl'')
-        | _ -> failwith "Expected , or ) in function arguments"
+Effectue un pattern matching en conservant les matchs
+dans une liste associative. La première expression est
+le pattern et la seconde est la cible sur laquelle on match. *)
+and matches (env : env_t) ((pattern, target) : expr * expr) : env_t =
+  match (pattern, target) with
+  (* Un litéral du pattern correspond à un litéral
+   de l'arbre cible. De plus si c'est un nom, on le
+   rajoute à l'environnement pour procéder à une
+   identification. *)
+  | Int x, Int y when x = y -> env
+  | Sym x, _ -> (x, target) :: env
+  (* On a trouvé un bon candidat pour une opération binaire,
+   on regarde alors le sous-arbre de gauche et le sous-arbre droit. *)
+  | BinOp (o, x, y), BinOp (o', x', y') when o = o' ->
+      matches (matches env (x, x')) (y, y')
+  (* Même chose sur les opérateurs d'arité 1 et géneralisation aux
+   fonctions d'arité quelconque. *)
+  | UnOp (o, x), UnOp (o', x') when o = o' -> matches env (x, x')
+  | Call (f, xs), Call (g, ys) when List.length xs = List.length ys -> (
+      let rec aux (e : env_t) : exprs * exprs -> env_t = function
+        | [], [] -> e
+        | x :: t, y :: t' -> (
+            match matches e (x, y) with [] -> [] | e' -> aux e' (t, t'))
+        | _ -> []
       in
-      (arg :: args, tl')
+      match aux ((f, Call (f, ys)) :: env) (xs, ys) with
+      | [] -> []
+      | x -> (f, Sym g) :: x)
+  | _ -> []
 
-and matches (pattern : expr) (on : expr) (env : env_t) : env_t option =
-  match (pattern, on) with
-  | Int i, Int j when i = j -> Some env
-  | Name v, _ -> Some ((v, on) :: env)
-  | UnOp (op, e), UnOp (op', e') when op = op' -> matches e e' env
-  | BinOp (op, l, r), BinOp (op', l', r') when op = op' -> (
-      match matches l l' env with
-      | Some env' -> matches r r' env'
-      | None -> None)
-  | Call (f, xs), Call (f', xs') when List.length xs = List.length xs' -> (
-      let rec match_args xs xs' env =
-        match (xs, xs') with
-        | [], [] -> Some env
-        | x :: tl, x' :: tl' -> (
-            match matches x x' env with
-            | Some env' -> match_args tl tl' env'
-            | None -> None)
-        | _ -> None
-      in
-      match match_args xs xs' ((f, Call (f, xs')) :: env) with
-      | Some x -> Some ((f, Name f') :: x)
-      | None -> None)
-  | _ -> None
+(* apply : env_t -> expr -> expr
 
+Applique des modifications sur une expression selon
+un environnement donnée. *)
 and apply (env : env_t) : expr -> expr = function
-  | Name v -> List.assoc v env
+  | Sym v -> List.assoc v env
   | Int _ as e -> e
-  | UnOp (op, x) -> UnOp (op, apply env x)
-  | BinOp (op, x, y) -> BinOp (op, apply env x, apply env y)
+  | UnOp (o, x) -> UnOp (o, apply env x)
+  | BinOp (o, x, y) -> (apply env x <*> apply env y) o
   | Call (f, args) ->
-      let f' = match List.assoc f env with Name v -> v | _ -> failwith "" in
+      let f' = match List.assoc f env with Sym v -> v | _ -> failwith "" in
       Call (f', List.map (apply env) args)
 
-and subst (from : expr) (into : expr) (on : expr) : expr =
-  match matches from on [] with
-  | Some env -> apply env into
-  | None -> (
-      match on with
-      | Int _ | Name _ -> on
-      | UnOp (op, x) -> UnOp (op, subst from into x)
-      | BinOp (op, x, y) -> BinOp (op, subst from into x, subst from into y)
-      | Call (f, xs) -> Call (f, List.map (subst from into) xs))
+(* subst : expr (A) * expr (B) -> expr (C) -> expr
 
-and run (xs : tokens) : unit =
-  let stack = xs |> List.to_seq |> Stack.of_seq in
-  let rec pu n =
-    match Stack.pop stack with Sym x when x = n -> [] | x -> x :: pu n
-  and u xs = xs |> List.rev |> parse_math |> List.hd
-  and unwrap = function Some y -> y | None -> failwith "Unwrap None"
-  and next_name () =
-    match Stack.pop stack with Sym x -> x | _ -> failwith "Expected a name"
-  and parseto x = x |> pu |> parse_math |> List.hd
+Applique la substitution des sous-arbres qui "ressemblent"
+à (A) par les sous-arbres (B) sur l'arbre de syntaxe (C). *)
+and subst ((x, y) as r : expr * expr) (z : expr) : expr =
+  match matches [] (x, z) with
+  | [] -> (
+      match z with
+      | UnOp (o, x) -> UnOp (o, subst r x)
+      | BinOp (o, x, y) -> (subst r x <*> subst r y) o
+      | Call (f, xs) -> Call (f, List.map (subst r) xs)
+      | z -> z)
+  | env -> apply env y
+
+(* run : exprs -> unit
+
+Procésseur uXm *)
+and run (xs : exprs) =
+  let stack = List.to_seq xs |> Stack.of_seq in
+  let rec pu n = match pop () with Sym n' when n' = n -> [] | n' -> n' :: pu n
+  and sym () = match pop () with Sym n -> n | _ -> failwith ""
+  and pop () = Stack.pop stack
+  and pto n = pu n |> parse |> fun (x, _) -> x
+  and u xs = List.rev xs |> parse |> fun (x, _) -> x
   and es = Hashtbl.create 128
+  and ss = Hashtbl.create 128
   and rs = Hashtbl.create 128 in
 
   while not (Stack.is_empty stack) do
-    match Stack.pop stack with
+    match pop () with
+    | Sym "apply" ->
+        let r = sym () and e = sym () in
+        let rec aux e =
+          let e' = List.fold_left (fun acc r -> subst r acc) e cs in
+          if e = e' then e else aux e'
+        and cs = Hashtbl.find rs r in
+        aux (Hashtbl.find es e) |> Hashtbl.replace es e
+    | Sym "struct" ->
+        let n = sym () in
+        let rec aux acc =
+          match pop () with
+          | Sym "|" -> acc :: aux []
+          | Sym "end" -> [ acc ]
+          | t -> aux (t :: acc)
+        in
+        let laws =
+          aux [] |> List.tl
+          |> List.map (fun law ->
+                 match List.rev law with
+                 | Sym (("intern" | "extern") as t)
+                   :: Sym symbol
+                   :: identity :: axiom_ids ->
+                     let x = (Sym "%" <*> Sym "%%") "<$>"
+                     and y = (Sym "%" <*> Sym "%%") symbol in
+                     let axioms =
+                       List.map str_of_expr axiom_ids
+                       |> List.map (Hashtbl.find es)
+                       |> List.map (fun z -> subst (x, y) z)
+                     in
+                     (t, symbol, identity, axioms)
+                 | _ -> failwith "Invalid, structure definition")
+        in
+        Hashtbl.add ss n laws
     | Sym "defrule" ->
-        let n = next_name () in
+        let n = sym () in
         let rec aux cs m r =
-          match Stack.pop stack with
+          match pop () with
           | Sym "|" ->
               let c' = if r = [] then cs else (m, u r) :: cs in
-              aux c' (parseto "into") []
+              aux c' (pto "into") []
           | Sym "end" -> (m, u r) :: cs
           | t -> aux cs m (t :: r)
         in
         if Stack.top stack = Sym "|" then Hashtbl.add rs n (aux [] (Int 0) [])
         else
-          let m = parseto "into" and r = parseto "end" in
+          let m = pto "into" and r = pto "end" in
           Hashtbl.add rs n [ (m, r) ]
     | Sym "defex" ->
-        let n = next_name () in
-        Hashtbl.add es n (parseto "end")
-    | Sym "apply" ->
-        let rec aux xs acc =
-          match xs with [] -> acc | (x, y) :: tl -> aux tl (subst x y acc)
-        in
-        let r = next_name () and e = next_name () in
-        Hashtbl.find_opt es e |> unwrap
-        |> aux (Hashtbl.find rs r |> List.rev)
-        |> Hashtbl.add es e
-    | Sym "puts" ->
-        next_name () |> Hashtbl.find es |> string_of_expr |> print_endline
-    | _ -> failwith "Unexpected token while executing"
+        let n = sym () in
+        Hashtbl.add es n (pto "end")
+    | Sym "puts" -> sym () |> Hashtbl.find es |> str_of_expr |> print_endline
+    | t -> failwith (Printf.sprintf "Unexpected token: %s" (str_of_expr t))
   done;
   ()
 ;;
 
 if Array.length Sys.argv <> 2 then failwith "Usage: uxm <path>";
 let ch = open_in_bin Sys.argv.(1) in
-let content = in_channel_length ch |> really_input_string ch in
-close_in ch;
-content |> tokenize |> run
+in_channel_length ch |> really_input_string ch |> tokenize |> run;
+close_in ch

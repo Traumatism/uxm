@@ -1,0 +1,10 @@
+defrule f sum(k, 1, n+1, k) into sum(k, 1, n, k) + (n + 1) end
+
+defex x sum(k, 1, n+1, k) end
+
+apply f x
+puts x
+apply f x
+puts x
+apply f x
+puts x

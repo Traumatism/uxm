@@ -1,0 +1,17 @@
+defrule square
+    a*a into a^2
+end
+
+defrule extend
+    | (a+b)^2 into (a+b) * (a+b)
+    | a * (b + c) into a * b + a * c
+    | (b + c) * a into b * a + c * a
+end
+
+defex e0
+    (a+b)^2
+end
+
+puts e0
+apply extend e0 2
+puts e0
