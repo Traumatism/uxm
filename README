@@ -1,72 +1,18 @@
-~         __ __
-~     _ _|  |  |_____
-~    | | |-   -|     |
-~    |___|__|__|_|_|_|
+~  __  __     __  __     __    __    
+~ /\ \/\ \   /\_\_\_\   /\ "-./  \   
+~ \ \ \_\ \  \/_/\_\/_  \ \ \-./\ \  
+~  \ \_____\   /\_\/\_\  \ \_\ \ \_\ 
+~   \/_____/   \/_/\/_/   \/_/  \/_/ 
 
 > unUsable eXpression Manager
 
 Just a "Travail d'Initiative Personnelle Encadré" project :3
 
-Syntax
-------
 
-Define a rule
-=============
+Compile & Run:
 
-defrule <name2>
-    <expr1> into <expr2>
-end
+- ocamlc uxm.ml -o uxm
+- ./uxm <file.uxm>
 
-defrule <name1>
-    | <expr1> into <expr2>
-    ...
-    | <exprn> into <exprn>
-end
+See 'examples/' for more.
 
-Define an eXpression
-====================
-
-defex <name> <expr> end
-
-Apply a rule
-============
-
-apply <rule name> <expr name>
-
-Print eXpression
-================
-
-puts <expr name>
-
-Examples
---------
-
-Peano Numbers:
-
-defrule add
-    | s(x) + y into s(x + y)
-    | s(0 + x) into s(x)
-    | 0 + s(x) into s(x)
-end
-
-defex threePlusFour
-    s(s(s(0))) + s(s(s(s(0))))
-end
-
-apply add threePlusFour
-apply add threePlusFour
-apply add threePlusFour
-apply add threePlusFour
-apply add threePlusFour
-
-puts threePlusFour
-
-Logic:
-
-defrule modusPonens
-    true(p) /\ true(p -> q) into true(q)
-end
-
-defrule induction
-    true(p(n0)) /\ true((p(n) -> p(n+1)) into true(p(n))
-end

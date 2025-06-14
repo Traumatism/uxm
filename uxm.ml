@@ -174,6 +174,8 @@ and matches (env : env_t) ((pattern, target) : expr * expr) : env_t =
   (* On a trouvé un bon candidat pour une opération binaire,
    on regarde alors le sous-arbre de gauche et le sous-arbre droit. *)
   | BinOp (o, x, y), BinOp (o', x', y') when o = o' ->
+      (* TODO: On pourrait regarder si ça match à gauche avant
+       de regarder si ça match à droite. *)
       matches (matches env (x, x')) (y, y')
   (* Même chose sur les opérateurs d'arité 1 et géneralisation aux
    fonctions d'arité quelconque. *)
