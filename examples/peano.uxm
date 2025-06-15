@@ -1,5 +1,4 @@
 defrule add
-    | 0 + X into X
     | X + 0 into X
     | X + s(Y) into s(X + Y)
 end
