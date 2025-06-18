@@ -1,4 +1,3 @@
-(* Une expression est un sous-arbre d'un arbre de syntaxe *)
 type expr =
   | Int of int
   | Sym of string
@@ -7,14 +6,9 @@ type expr =
   | Call of string * exprs
 
 and exprs = expr list
-
-(* Un parseur est une fonction qui prend en entrée une expression et renvoit la première "nouvelle expression" parsée, ainsi que le reste du flux d'expressions. *)
 and parser = exprs -> expr * exprs
-
-(* Environnement de matching, permet par exemple de lier un nom de variable relier un nom de variable avec un sous-AST matché. *)
 and env_t = (string * expr) list
 
-(* str_of_expr: expr -> string Prend en entrée une expression et renvoit sa représentation infix. *)
 let rec str_of_expr : expr -> string = function
   | Int x -> string_of_int x
   | Sym x -> x
@@ -24,11 +18,9 @@ let rec str_of_expr : expr -> string = function
   | Call (f, es) ->
       Printf.sprintf "%s(%s)" f (String.concat ", " (List.map str_of_expr es))
 
-(* <*>: expr -> expr -> string -> expr Opérateur qui crée un sous-arbre associé à une opération binaire *. Les deux premières entrées sont les deux fils (LHS, RHS) et la troisième est le symbole représentant l'opération * en question. *)
 and ( <*> ) : expr -> expr -> string -> expr = fun x y o -> BinOp (o, x, y)
 and ( <$> ) : string -> exprs -> expr = fun f xs -> Call (f, xs)
 
-(* parse_unary : parser Etape suivant le parsing des opérateurs binaires: on parse les opérateur d'arité 1: fonctions, opérateurs unaires... *)
 and parse_unary : parser = function
   | Sym f :: tl when List.mem f [ "~"; "-"; "+"; "&" ] ->
       let x, tl' = parse_unary tl in
@@ -51,7 +43,6 @@ and parse_unary : parser = function
   | x :: tl -> (x, tl)
   | [] -> failwith ""
 
-(* parse : parser Permet de parser complètement une expression. *)
 and parse : parser =
  fun xs ->
   let rec aux = function
@@ -78,7 +69,6 @@ and parse : parser =
     ]
     xs
 
-(* tokenize : string -> exprs Permet d'obtenir une liste d'expressions (que des Sym et des Int) à partir d'une chaine de caractères. *)
 and tokenize (str : string) : exprs =
   let rec take_while p acc =
     match !chars with
@@ -108,6 +98,17 @@ and tokenize (str : string) : exprs =
           aux (Int v :: acc)
         else
           match c :: tl with
+          | '(' :: '*' :: tl' ->
+              let rec ignore () =
+                match !chars with
+                | [] -> failwith "EOF"
+                | '*' :: ')' :: tl' -> chars := tl'
+                | x :: tl' ->
+                    chars := tl';
+                    ignore ()
+              in
+              ignore ();
+              aux acc
           | '<' :: (('=' | '-' | '~' | '$') as bar) :: '>' :: tl' ->
               chars := tl';
               aux (Sym ("<" ^ String.make 1 bar ^ ">") :: acc)
@@ -125,18 +126,12 @@ and tokenize (str : string) : exprs =
   in
   aux []
 
-(* matches : env_t -> expr * expr -> env Effectue un pattern matching en conservant les matchs dans une liste associative. La première expression est le pattern et la seconde est la cible sur laquelle on match. *)
 and matches (env : env_t) ((pattern, target) : expr * expr) : env_t =
   match (pattern, target) with
-  (* Un litéral du pattern correspond à un litéral de l'arbre cible. De plus si c'est un nom, on le rajoute à l'environnement pour procéder à une identification. *)
   | Int x, Int y when x = y -> env
-  | Sym x, _ ->
-      (x, target) :: env
-      (* On a trouvé un bon candidat pour une opération binaire, on regarde alors le sous-arbre de gauche et le sous-arbre droit. *)
+  | Sym x, _ -> (x, target) :: env
   | BinOp (f, x, y), BinOp (g, x', y') when f = g ->
-      (* TODO: On pourrait regarder si ça match à gauche avant de regarder si ça match à droite. *)
       matches (matches env (x, x')) (y, y')
-      (* Même chose sur les opérateurs d'arité 1 et géneralisation aux fonctions d'arité quelconque. *)
   | UnOp (f, x), UnOp (g, y) when f = g -> matches env (x, y)
   | Call (f, xs), Call (g, ys) when List.length xs = List.length ys -> (
       let rec aux (e : env_t) : exprs * exprs -> env_t = function
@@ -150,7 +145,6 @@ and matches (env : env_t) ((pattern, target) : expr * expr) : env_t =
       | x -> (f, Sym g) :: x)
   | _ -> []
 
-(* apply : env_t -> expr -> expr Applique des modifications sur une expression selon un environnement donnée. *)
 and apply (env : env_t) : expr -> expr = function
   | Sym v -> List.assoc v env
   | Int _ as e -> e
@@ -160,7 +154,6 @@ and apply (env : env_t) : expr -> expr = function
       let f' = match List.assoc f env with Sym v -> v | _ -> failwith "" in
       f' <$> List.map (apply env) xs
 
-(* subst : expr (A) * expr (B) -> expr (C) -> expr Applique la substitution des sous-arbres qui "ressemblent" à (A) par les sous-arbres (B) sur l'arbre de syntaxe (C). *)
 and subst ((x, y) as r : expr * expr) (z : expr) : expr =
   match matches [] (x, z) with
   | [] -> (
@@ -171,7 +164,6 @@ and subst ((x, y) as r : expr * expr) (z : expr) : expr =
       | z -> z)
   | env -> apply env y
 
-(* run : exprs -> unit Procésseur uXm *)
 and run (xs : exprs) =
   let stack = List.to_seq xs |> Stack.of_seq in
   let rec pu n = match pop () with Sym n' when n' = n -> [] | n' -> n' :: pu n
@@ -184,14 +176,18 @@ and run (xs : exprs) =
   and rs = Hashtbl.create 128 in
   while not (Stack.is_empty stack) do
     match pop () with
-    (* apply <nom règle> <nom expression> *)
     | Sym "apply" ->
-        let r = sym () and e = sym () in
+        let r = sym () and e_name = sym () in
+        let e = Hashtbl.find es e_name in
+        Printf.printf "\n[*] Applying rule: `%s` on expression: %s\n" r
+          (str_of_expr e);
         let rec aux e =
           let e' = List.fold_left (fun acc r -> subst r acc) e cs in
           if e = e' then e else aux e'
         and cs = Hashtbl.find rs r in
-        aux (Hashtbl.find es e) |> Hashtbl.replace es e
+        let new_e = aux e in
+        Hashtbl.replace es e_name new_e;
+        Printf.printf " => Result: %s\n" (str_of_expr new_e)
     | Sym "struct" ->
         let n = sym () in
         let rec aux acc =
@@ -218,7 +214,6 @@ and run (xs : exprs) =
                  | _ -> failwith "Invalid, structure definition")
         in
         Hashtbl.add ss n laws
-        (* defrule <nom> <expr> into <expr'> end (ou) defrule <nom> | <expr1> into <expr1'> ... | <exprN> into <exprN'> end *)
     | Sym "defrule" ->
         let n = sym () in
         let rec aux cs m r =
@@ -233,12 +228,9 @@ and run (xs : exprs) =
         else
           let m = pto "into" and r = pto "end" in
           Hashtbl.add rs n [ (m, r) ]
-        (* defex <nom> <expr> end *)
     | Sym "defex" ->
         let n = sym () in
         Hashtbl.add es n (pto "end")
-        (* puts <nom> *)
-    | Sym "puts" -> sym () |> Hashtbl.find es |> str_of_expr |> print_endline
     | t -> failwith (Printf.sprintf "Unexpected token: %s" (str_of_expr t))
   done;
   ()
