@@ -61,8 +61,9 @@ and parse : parser =
       [ "=>"; "<=>"; "->"; "<->"; "<~>"; "~>" ];
       [ "\\/" ];
       [ "/\\" ];
-      [ "=" ];
       [ "<$>" ];
+      [ "=" ];
+      [ "..." ];
       [ "+"; "-" ];
       [ "."; "*"; "/" ];
       [ "^" ];
@@ -109,6 +110,9 @@ and tokenize (str : string) : exprs =
               in
               ignore ();
               aux acc
+          | '.' :: '.' :: '.' :: tl' ->
+              chars := tl';
+              aux (Sym "..." :: acc)
           | '<' :: (('=' | '-' | '~' | '$') as bar) :: '>' :: tl' ->
               chars := tl';
               aux (Sym ("<" ^ String.make 1 bar ^ ">") :: acc)
@@ -146,7 +150,9 @@ and matches (env : env_t) ((pattern, target) : expr * expr) : env_t =
   | _ -> []
 
 and apply (env : env_t) : expr -> expr = function
-  | Sym v -> List.assoc v env
+  | Sym v -> (
+      try List.assoc v env
+      with Not_found -> failwith (Printf.sprintf "Not found: %s" v))
   | Int _ as e -> e
   | UnOp (o, x) -> UnOp (o, apply env x)
   | BinOp (o, x, y) -> (apply env x <*> apply env y) o
@@ -167,7 +173,7 @@ and subst ((x, y) as r : expr * expr) (z : expr) : expr =
 and run (xs : exprs) =
   let stack = List.to_seq xs |> Stack.of_seq in
   let rec pu n = match pop () with Sym n' when n' = n -> [] | n' -> n' :: pu n
-  and sym () = match pop () with Sym n -> n | _ -> failwith ""
+  and sym () = match pop () with Sym n -> n | _ -> failwith "..."
   and pop () = Stack.pop stack
   and pto n = pu n |> parse |> fun (x, _) -> x
   and u xs = List.rev xs |> parse |> fun (x, _) -> x
@@ -176,6 +182,16 @@ and run (xs : exprs) =
   and rs = Hashtbl.create 128 in
   while not (Stack.is_empty stack) do
     match pop () with
+    | Sym "applyonce" ->
+        let r = sym () and e_name = sym () in
+        let e = Hashtbl.find es e_name in
+        Printf.printf "\n[*] Applying rule: `%s` on expression: %s\n" r
+          (str_of_expr e);
+
+        let cs = Hashtbl.find rs r in
+        let new_e = List.fold_left (fun acc r -> subst r acc) e cs in
+        Printf.printf " => Result: %s\n" (str_of_expr new_e);
+        Hashtbl.add es e_name new_e
     | Sym "apply" ->
         let r = sym () and e_name = sym () in
         let e = Hashtbl.find es e_name in
@@ -186,8 +202,8 @@ and run (xs : exprs) =
           if e = e' then e else aux e'
         and cs = Hashtbl.find rs r in
         let new_e = aux e in
-        Hashtbl.replace es e_name new_e;
-        Printf.printf " => Result: %s\n" (str_of_expr new_e)
+        Printf.printf " => Result: %s\n" (str_of_expr new_e);
+        Hashtbl.replace es e_name new_e
     | Sym "struct" ->
         let n = sym () in
         let rec aux acc =

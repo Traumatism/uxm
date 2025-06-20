@@ -1,10 +1,41 @@
-defrule f sum(k, 1, n+1, k) into sum(k, 1, n, k) + (n + 1) end
+defrule p
+    S(n) = (n(n+1))/2 into p(n)
+end
 
-defex x sum(k, 1, n+1, k) end
+defrule hyp
+    sum(k = (1 ... n), k) into (n*(n+1))/2
+end
 
-apply f x
-puts x
-apply f x
-puts x
-apply f x
-puts x
+defrule r1
+    sum(k = (1 ... n+1), k) into sum(k = (1 ... n), k) + (n + 1)
+end
+
+(* Règles sur les fractions *)
+defrule r2
+    (A / B) + C into A/B + (B*C)/B
+end
+
+defrule r3
+    | A/C + B/C   into (A+B)/C
+    | A*C + B*C   into (A+B)*C
+end
+
+defrule r4
+    A * B into B * A
+end
+
+defrule r5
+    n + 2 into (n+1)+1
+end
+
+defex e0
+    sum(k = (1 ... n+1), k)
+end
+
+apply r1  e0
+apply hyp e0
+applyonce r2 e0
+apply r3 e0
+applyonce r4 e0
+apply r5 e0
+

@@ -1,0 +1,18 @@
+defrule factorisation
+    | A * B + A * C into A * (B + C)
+    | B * A + C * A into (B + C) * A
+end
+
+defex e0
+    x * y * (x + 1) + x * (z + 1) * (x + 1)
+end
+
+apply factorisation e0
+
+defex e1
+    (x * (x + 1)) * y + (x * (x + 1)) * z
+end
+
+apply factorisation e0
+
+
